@@ -131,7 +131,7 @@ https://github.com/nodeca/pako/blob/main/LICENSE
 <script src="config.js"></script>
 <script>
 "use strict";
-const APP_VERSION='3.0';
+const APP_VERSION='3.1';
 const TYPES=window.TPL_DATA.types; const TYPE={}; TYPES.forEach(t=>TYPE[t.id]=t);
 const CONFIG=Object.assign({syncUrl:'',teamKey:''},window.APP_CONFIG||{});
 const $=(s,el=document)=>el.querySelector(s);
@@ -296,7 +296,7 @@ async function renderHome(){
   const frentes=TYPES.filter(t=>t.kind==='frente');
   const item=i=>{ const t=TYPE[i.typeId]; const s=t.kind!=='ria'?stats(i):null;
     const sub=t.kind==='ria'?`Semana ${semanaTxt(i.header.weekStart)}`:`${fmtDate(i.header.data)}${s?` · ${s.done}/${s.tot} itens`:''}`;
-    return `<div class="list-i" data-open="${i.id}"><div class="ic">${t.icon}</div><div class="x"><b>${esc(t.kind==='frente'?t.title:t.title.split(' – ')[0])}</b><span>${esc(i.header.obra||'(obra não informada)')}${i.header.torre?' · '+esc(i.header.torre):''}</span><span>${sub}</span></div><div style="text-align:right">${statusPill(i)}<br>${syncPill(i)}</div></div>`; };
+    return `<div class="list-i" data-open="${i.id}"><div class="ic">${t.icon}</div><div class="x"><b>${esc(t.kind==='frente'?t.title:t.title.split(' – ')[0])}</b><span>${esc(i.header.obra||'(obra não informada)')}${i.header.torre?' · '+esc(i.header.torre):''}</span><span>${sub}</span></div><div style="text-align:right">${statusPill(i)}<br>${syncPill(i)}</div><button class="btn sm sec" data-del="${i.id}" aria-label="Excluir" style="padding:8px 9px">🗑</button></div>`; };
   app.innerHTML=`
   ${riaOpen?`<div class="card" style="border:2px solid ${riaLate(riaOpen)?'#fca5a5':'#86efac'}"><div class="row" style="justify-content:space-between"><b>🗓️ RIA da semana</b>${statusPill(riaOpen)}</div>
     <p class="muted" style="margin:6px 0 10px">${esc(riaOpen.header.obra||'')} · ${semanaTxt(riaOpen.header.weekStart)}${riaLate(riaOpen)?' · semana encerrada sem finalização':''}</p><button class="btn block" data-open="${riaOpen.id}">Continuar RIA</button></div>`:''}
@@ -311,7 +311,8 @@ async function renderHome(){
   <div class="row" style="margin-bottom:12px"><button class="btn sec" style="flex:1" id="bAdm">🔐 Administrador</button><button class="btn sec" style="flex:1" id="bCfg">⚙️ Configurações</button></div>
   <p class="muted" style="text-align:center">Versão ${APP_VERSION} · funciona sem internet</p>`;
   app.querySelectorAll('[data-new]').forEach(b=>b.onclick=async()=>{ const last=await idb.get('kv','lastHeader').catch(()=>null); cur=newInsp(b.dataset.new,last); T=TYPE[cur.typeId]; await saveNow(); tab='dados'; openSec=null; openDay=null; renderInsp(); });
-  app.querySelectorAll('[data-open]').forEach(b=>b.onclick=async()=>openInsp(b.dataset.open));
+  app.querySelectorAll('[data-open]').forEach(b=>b.onclick=async e=>{ if(e.target.closest('[data-del]')) return; openInsp(b.dataset.open); });
+  app.querySelectorAll('[data-del]').forEach(b=>b.onclick=async e=>{ e.stopPropagation(); const i=list.find(x=>x.id===b.dataset.del); if(await excluirInsp(i)) renderHome(); });
   $('#bAdm').onclick=renderAdminLogin; $('#bCfg').onclick=renderConfig;
   syncAll();
 }
@@ -488,8 +489,10 @@ async function renderFim(){
       <label>Responsável pela inspeção</label><input type="text" id="sgN1" value="${esc(h.respInsp||profile.nome)}"><div id="pad1" style="margin-top:8px"></div><button class="btn sm sec" data-clr="1" style="margin-top:6px">Limpar</button>
       <label style="margin-top:18px">Responsável pela atividade${T.kind==='canteiro'?' / canteiro':''}</label><input type="text" id="sgN2" value="${esc(h.respAtiv||'')}" placeholder="Nome de quem acompanhou"><div id="pad2" style="margin-top:8px"></div><button class="btn sm sec" data-clr="2" style="margin-top:6px">Limpar</button>
       <p class="muted">As assinaturas entram no relatório com data e hora. Funciona sem internet.</p>
-      <div id="fErr"></div><button class="btn block" id="bFin" style="margin-top:6px">✅ Finalizar e gerar relatório</button></div>`;
+      <div id="fErr"></div><button class="btn block" id="bFin" style="margin-top:6px">✅ Finalizar e gerar relatório</button></div>
+      <button class="btn sec block" id="bDel" style="color:var(--r)">🗑 Excluir esta inspeção</button>`;
     app.innerHTML=html; const p1=sigPad($('#pad1')), p2=sigPad($('#pad2'));
+    $('#bDel').onclick=async()=>{ if(await excluirInsp(cur)){ cur=null; renderHome(); } };
     app.querySelectorAll('[data-clr]').forEach(b=>b.onclick=()=>(b.dataset.clr==='1'?p1:p2).clear());
     $('#bFin').onclick=async()=>{ const n1=$('#sgN1').value.trim(), n2=$('#sgN2').value.trim();
       if(p1.isEmpty()||!n1){ $('#fErr').innerHTML='<div class="err">Falta a assinatura e o nome do responsável pela inspeção.</div>'; return; }
@@ -502,8 +505,9 @@ async function renderFim(){
   html+=`<div class="card"><h2>Relatório</h2><p class="muted" style="margin-top:0">Finalizada em ${fmtDT(cur.finalizedAt)} · ${syncUrl()?(cur.sync&&cur.sync.state==='enviado'?`enviada ao Drive em ${fmtDT(cur.sync.at)}`:'aguardando internet para enviar ao Drive'):'envio ao Drive não configurado'}</p>
     <button class="btn block" id="bGen">📄 Gerar / compartilhar relatório Excel</button><div id="out" style="margin-top:12px"></div></div>
     <div class="card"><h2>Assinaturas</h2>${await sigView('insp','Responsável pela inspeção')}${await sigView('ativ','Responsável pela atividade')}</div>
-    <button class="btn sec block" id="bReopen">↩︎ Reabrir para editar</button>`;
-  app.innerHTML=html; $('#bGen').onclick=gerar;
+    <button class="btn sec block" id="bReopen">↩︎ Reabrir para editar</button>
+    <button class="btn red block" id="bDel" style="margin-top:10px">🗑 Excluir inspeção deste celular</button>`;
+  app.innerHTML=html; $('#bGen').onclick=gerar; $('#bDel').onclick=async()=>{ if(await excluirInsp(cur)){ cur=null; renderHome(); } };
   $('#bReopen').onclick=async()=>{ if(!await ask('Reabrir a inspeção? As assinaturas serão removidas e precisarão ser coletadas de novo.','Reabrir')) return; for(const k in cur.sigs) await idb.del('photos',cur.sigs[k].photoId).catch(()=>{}); cur.sigs={}; cur.status='andamento'; cur.finalizedAt=null; await saveNow(); renderInsp(); };
 }
 async function sigView(k,lab){ const s=cur.sigs[k]; if(!s) return `<p class="muted">${lab}: sem assinatura</p>`; return `<label>${lab}</label><div class="sigimg"><img src="${await photoURL(s.photoId)}"><div class="muted">${esc(s.nome)} · ${fmtDT(s.ts)}</div></div>`; }
@@ -612,6 +616,19 @@ async function syncAll(){ if(!syncUrl()||syncing||!navigator.onLine) { if(syncUr
   } finally{ syncing=false; } }
 window.addEventListener('online',syncAll); setInterval(syncAll,5*60000);
 
+/* ================= Exclusão ================= */
+async function excluirInsp(i,semPin){
+  const t=TYPE[i.typeId]; const nome=`${t.kind==='frente'?t.title:t.title.split(' – ')[0]} – ${i.header.obra||'(sem obra)'}`;
+  let aviso=`Excluir "${nome}" e todas as fotos dela deste celular? Isso não pode ser desfeito.`;
+  if(i.status!=='finalizada') aviso='Esta inspeção ainda NÃO foi finalizada. '+aviso;
+  else if(syncUrl() && (!i.sync||i.sync.state!=='enviado')) aviso='Esta inspeção ainda NÃO foi enviada ao Drive. Baixe o relatório antes. '+aviso;
+  if(!await ask(aviso,'Excluir',true)) return false;
+  if(!semPin && !await askPin('Digite seu PIN para confirmar a exclusão')){ toast('PIN incorreto'); return false; }
+  await apagar(i); toast('Inspeção excluída'); return true; }
+async function apagar(i){ const ids=[...Object.values(i.photos||{}).map(p=>p.photoId),...(i.photoList||[]).map(p=>p.photoId),...Object.values(i.sigs||{}).map(s=>s.photoId)];
+  for(const id of ids){ await idb.del('photos',id).catch(()=>{}); if(urlCache[id]){ URL.revokeObjectURL(urlCache[id]); delete urlCache[id]; } }
+  await idb.del('insp',i.id); }
+
 /* ================= Configurações ================= */
 function renderConfig(){ hideInspChrome(); backFn=renderHome; setHeader('Configurações','',true);
   app.innerHTML=`<div class="card"><h2>Perfil</h2><p style="margin:0"><b>${esc(profile.nome)}</b>${profile.funcao?' · '+esc(profile.funcao):''}</p><button class="btn sec sm" id="bSwitch" style="margin-top:10px">Trocar usuário</button></div>
@@ -619,7 +636,18 @@ function renderConfig(){ hideInspChrome(); backFn=renderHome; setHeader('Configu
    <label>Endereço do servidor (Apps Script)</label><input type="url" id="cUrl" value="${esc(settings.syncUrl)}" placeholder="${esc(CONFIG.syncUrl||'https://script.google.com/macros/s/…/exec')}">
    <label>Chave da equipe</label><input type="text" id="cKey" value="${esc(settings.teamKey)}" placeholder="${CONFIG.teamKey?'(definida pela equipe)':''}">
    <div class="row" style="margin-top:12px"><button class="btn" id="cSave">Salvar</button><button class="btn sec" id="cTest">Testar conexão</button><button class="btn sec" id="cNow">Enviar agora</button></div><div id="cOut" style="margin-top:10px"></div></div>
+  <div class="card"><h2>Espaço no celular</h2><p class="muted" style="margin-top:0" id="espInfo">Calculando…</p>
+   <label>Excluir inspeções finalizadas há mais de</label><select id="limDias"><option value="0">qualquer data</option><option value="7">7 dias</option><option value="30" selected>30 dias</option><option value="90">90 dias</option></select>
+   <label class="chk"><input type="checkbox" id="limSync" ${syncUrl()?"checked":""}> Só as que já foram enviadas ao Drive</label>
+   <button class="btn red block" id="bLimpar">🗑 Excluir finalizadas</button></div>
   <div class="card"><h2>Sobre</h2><p class="muted" style="margin:0">Versão ${APP_VERSION}. Modelos: FI.BRA.GER-10.01A (canteiro), 10.01B (RIA) e checklists semanais por frente. Os dados ficam neste celular até serem enviados.</p></div>`;
+  (async()=>{ const l=await idb.all('insp'); const f=l.filter(i=>i.status==='finalizada').length; let mb=''; try{ const e=await navigator.storage.estimate(); mb=` · ${(e.usage/1048576).toFixed(0)} MB usados`; }catch(_){} $('#espInfo').textContent=`${l.length} inspeções salvas (${f} finalizadas)${mb}.`; })();
+  $('#bLimpar').onclick=async()=>{ const dias=+$('#limDias').value, so=$('#limSync').checked; const lim=Date.now()-dias*86400000;
+    const alvo=(await idb.all('insp')).filter(i=>i.status==='finalizada' && (i.finalizedAt||0)<=lim && (!so || (i.sync&&i.sync.state==='enviado')));
+    if(!alvo.length){ toast('Nenhuma inspeção se encaixa nesse filtro.'); return; }
+    if(!await ask(`Excluir ${alvo.length} inspeção(ões) finalizada(s) e suas fotos deste celular?`,'Excluir',true)) return;
+    if(!await askPin('Digite seu PIN para confirmar')){ toast('PIN incorreto'); return; }
+    for(const i of alvo) await apagar(i); toast(`${alvo.length} excluída(s)`); renderConfig(); };
   $('#cSave').onclick=async()=>{ settings.syncUrl=$('#cUrl').value.trim(); settings.teamKey=$('#cKey').value.trim(); await idb.put('kv',settings,'settings'); toast('Salvo'); };
   $('#cTest').onclick=async()=>{ $('#cOut').innerHTML='<span class="muted">Testando…</span>'; try{ const j=await post({acao:'ping',tecnico:profile.nome}); $('#cOut').innerHTML=`<div class="info">Conectado ✓ ${esc(j.msg||'')}</div>`; }catch(e){ $('#cOut').innerHTML=`<div class="err">${esc(e.message)}</div>`; } };
   $('#cNow').onclick=async()=>{ $('#cOut').innerHTML='<span class="muted">Enviando…</span>'; await syncAll(); const l=await idb.all('insp'); const p=l.filter(i=>i.status==='finalizada'&&(!i.sync||i.sync.state!=='enviado')).length; $('#cOut').innerHTML=p?`<div class="warn">${p} ainda não enviada(s). Verifique a internet e a configuração.</div>`:'<div class="info">Tudo enviado ✓</div>'; };
